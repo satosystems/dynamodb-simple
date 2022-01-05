@@ -81,6 +81,7 @@ module Database.DynamoDB (
   , deleteItemBatchByKey
     -- * Delete table
   , deleteTable
+  , deleteTable'
     -- * Utility functions
   , tableKey
     -- * Typeclasses
@@ -245,7 +246,11 @@ updateItemCond_ p pkey cond actions
 
 -- | Delete a table from DynamoDB.
 deleteTable :: (MonadAWS m, DynamoTable a r) => Proxy a -> m ()
-deleteTable p = void $ send (D.deleteTable (tableName p))
+deleteTable = void . deleteTable'
+
+-- | Delete a table from DynamoDB and receive response.
+deleteTable' :: (MonadAWS m, DynamoTable a r) => Proxy a -> m D.DeleteTableResponse
+deleteTable' p = send (D.deleteTable (tableName p))
 
 -- | Extract primary key from a record.
 --
