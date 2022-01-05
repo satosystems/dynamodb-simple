@@ -11,7 +11,7 @@ module BaseSpec where
 
 import           Control.Exception.Safe   (SomeException, catchAny, finally,
                                            try)
-import           Control.Lens             ((.~))
+import           Control.Lens             ((.~), (^.))
 import           Control.Monad.IO.Class   (liftIO)
 import           Data.Conduit             (runConduit, (=$=))
 import qualified Data.Conduit.List        as CL
@@ -22,7 +22,10 @@ import           Data.Proxy
 import           Data.Semigroup           ((<>))
 import qualified Data.Text                as T
 import           Network.AWS
-import           Network.AWS.DynamoDB     (dynamoDB)
+import           Network.AWS.DynamoDB     (dynamoDB, pirsResponseStatus,
+                                           dirsResponseStatus)
+import           Network.AWS.DynamoDB.PutItem
+                                          (PutItemResponse)
 import           System.Environment       (setEnv)
 import           System.IO                (stdout)
 import           Test.Hspec
@@ -79,12 +82,17 @@ spec = do
     withDb "putItem/getItem works" $ do
         let testitem1 = Test "1" 2 "text" False 3.14 2 Nothing
             testitem2 = Test "2" 3 "text" False 4.15 3 (Just "text")
+            testitem3 = Test "3" 4 "text" False 5.16 4 (Just "text")
         putItem testitem1
         putItem testitem2
+        res <- putItem' testitem3
+        liftIO $ res ^. pirsResponseStatus `shouldBe` 200
         it1 <- getItem Strongly tTest ("1", 2)
         it2 <- getItem Strongly tTest ("2", 3)
+        it3 <- getItem Strongly tTest ("3", 4)
         liftIO $ Just testitem1 `shouldBe` it1
         liftIO $ Just testitem2 `shouldBe` it2
+        liftIO $ Just testitem3 `shouldBe` it3
     withDb "getItemBatch/putItemBatch work" $ do
         let template i = Test (T.pack $ show i) i "text" False 3.14 i Nothing
             newItems = map template [1..300]
@@ -96,9 +104,15 @@ spec = do
     withDb "insertItem doesn't overwrite items" $ do
         let testitem1 = Test "1" 2 "text" False 3.14 2 Nothing
             testitem1_ = Test "1" 2 "XXXX" True 3.14 3 Nothing
+            testitem2 = Test "2" 3 "text" False 4.15 2 Nothing
+            testitem2_ = Test "2" 3 "XXXX" True 4.15 3 Nothing
         insertItem testitem1
         (res :: Either SomeException ()) <- try (insertItem testitem1_)
         liftIO $ res `shouldSatisfy` isLeft
+        res2 <- insertItem' testitem2
+        liftIO $ res2 ^. pirsResponseStatus `shouldBe` 200
+        (res3 :: Either SomeException PutItemResponse) <- try (insertItem' testitem2_)
+        liftIO $ res3 `shouldSatisfy` isLeft
     withDb "scanSource works correctly with sLimit" $ do
         let template i = Test (T.pack $ show i) i "text" False 3.14 i Nothing
             newItems = map template [1..55]
@@ -215,14 +229,22 @@ spec = do
     withDb "deleting by key" $ do
         let testitem1 = Test "1" 2 "" False 3.14 2 Nothing
         let testitem2 = Test "1" 3 "aaa" False 3.14 2 (Just "test")
+        let testitem3 = Test "1" 4 "" False 3.14 2 Nothing
+        let testitem4 = Test "1" 5 "aaa" False 3.14 2 (Just "test")
         putItem testitem1
         putItem testitem2
+        putItem testitem3
+        putItem testitem4
         (items, _) <- scan tTest scanOpts 10
         deleteItemByKey tTest (tableKey testitem1)
         deleteItemByKey tTest (tableKey testitem2)
+        res1 <- deleteItemByKey' tTest (tableKey testitem3)
+        res2 <- deleteItemByKey' tTest (tableKey testitem4)
+        liftIO $ res1 ^. dirsResponseStatus `shouldBe` 200
+        liftIO $ res2 ^. dirsResponseStatus `shouldBe` 200
         (items2, _) <- scan tTest scanOpts 10
         liftIO $ do
-          length items `shouldBe` 2
+          length items `shouldBe` 4
           length items2 `shouldBe` 0
 
     withDb "test left join" $ do

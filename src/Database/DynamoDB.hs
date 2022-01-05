@@ -65,18 +65,23 @@ module Database.DynamoDB (
   , innerJoin
     -- * Data entry
   , putItem
+  , putItem'
   , putItemBatch
   , insertItem
+  , insertItem'
     -- * Data modification
   , updateItemByKey
   , updateItemByKey_
   , updateItemCond_
     -- * Deleting data
   , deleteItemByKey
+  , deleteItemByKey'
   , deleteItemCondByKey
+  , deleteItemCondByKey'
   , deleteItemBatchByKey
     -- * Delete table
   , deleteTable
+  , deleteTable'
     -- * Utility functions
   , tableKey
     -- * Typeclasses
@@ -120,11 +125,19 @@ dGetItem p pkey = D.getItem (tableName p) & D.giKey .~ dKeyToAttr p pkey
 
 -- | Write item into the database; overwrite any previously existing item with the same primary key.
 putItem :: (MonadAWS m, DynamoTable a r) => a -> m ()
-putItem item = void $ send (dPutItem item)
+putItem = void . putItem'
+
+-- | Write item into the database and receive the response; overwrite any previously existing item with the same primary key.
+putItem' :: (MonadAWS m, DynamoTable a r) => a -> m D.PutItemResponse
+putItem' item = send (dPutItem item)
 
 -- | Write item into the database only if it doesn't already exist.
 insertItem  :: forall a r m. (MonadAWS m, DynamoTable a r) => a -> m ()
-insertItem item = do
+insertItem = void . insertItem'
+
+-- | Write item into the database only if it doesn't already exist and receive the response.
+insertItem'  :: forall a r m. (MonadAWS m, DynamoTable a r) => a -> m D.PutItemResponse
+insertItem' item = do
   let keyfields = primaryFields (Proxy :: Proxy a)
       -- Create condition attribute_not_exist(hash_key)
       pkeyMissing = (AttrMissing . nameGenPath . pure . IntraName) $ head keyfields
@@ -132,7 +145,7 @@ insertItem item = do
       cmd = dPutItem item & D.piExpressionAttributeNames .~ attnames
                           & D.piConditionExpression .~ Just expr
                           & bool (D.piExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
-  void $ send cmd
+  send cmd
 
 
 -- | Read item from the database; primary key is either a hash key or (hash,range) tuple depending on the table.
@@ -149,18 +162,28 @@ getItem consistency p key = do
 
 -- | Delete item from the database by specifying the primary key.
 deleteItemByKey :: forall m a r. (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> m ()
-deleteItemByKey p pkey = void $ send (dDeleteItem p pkey)
+deleteItemByKey p pkey = void $ deleteItemByKey' p pkey
+
+-- | Delete item from the database by specifying the primary key and receive the response.
+deleteItemByKey' :: forall m a r. (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> m D.DeleteItemResponse
+deleteItemByKey' p pkey = send (dDeleteItem p pkey)
 
 -- | Delete item from the database by specifying the primary key and a condition.
 -- Throws AWS exception if the condition does not succeed.
 deleteItemCondByKey :: forall m a r.
     (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> FilterCondition a -> m ()
-deleteItemCondByKey p pkey cond =
+deleteItemCondByKey p pkey cond = void $ deleteItemCondByKey' p pkey cond
+
+-- | Delete item from the database by specifying the primary key and a condition and receive response.
+-- Throws AWS exception if the condition does not succeed.
+deleteItemCondByKey' :: forall m a r.
+    (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> FilterCondition a -> m D.DeleteItemResponse
+deleteItemCondByKey' p pkey cond =
     let (expr, attnames, attvals) = dumpCondition cond
         cmd = dDeleteItem p pkey & D.diExpressionAttributeNames .~ attnames
                                  & bool (D.diExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
                                  & D.diConditionExpression .~ Just expr
-    in void (send cmd)
+    in send cmd
 
 -- | Generate update item object; automatically adds condition for existence of primary
 -- key, so that only existing objects are modified
@@ -223,7 +246,11 @@ updateItemCond_ p pkey cond actions
 
 -- | Delete a table from DynamoDB.
 deleteTable :: (MonadAWS m, DynamoTable a r) => Proxy a -> m ()
-deleteTable p = void $ send (D.deleteTable (tableName p))
+deleteTable = void . deleteTable'
+
+-- | Delete a table from DynamoDB and receive response.
+deleteTable' :: (MonadAWS m, DynamoTable a r) => Proxy a -> m D.DeleteTableResponse
+deleteTable' p = send (D.deleteTable (tableName p))
 
 -- | Extract primary key from a record.
 --
