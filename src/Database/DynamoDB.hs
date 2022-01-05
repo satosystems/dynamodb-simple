@@ -77,6 +77,7 @@ module Database.DynamoDB (
   , deleteItemByKey
   , deleteItemByKey'
   , deleteItemCondByKey
+  , deleteItemCondByKey'
   , deleteItemBatchByKey
     -- * Delete table
   , deleteTable
@@ -170,12 +171,18 @@ deleteItemByKey' p pkey = send (dDeleteItem p pkey)
 -- Throws AWS exception if the condition does not succeed.
 deleteItemCondByKey :: forall m a r.
     (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> FilterCondition a -> m ()
-deleteItemCondByKey p pkey cond =
-    let (expr, attnames, attvals) = dumpCondition cond
-        cmd = dDeleteItem p pkey & D.diExpressionAttributeNames .~ attnames
-                                 & bool (D.diExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
-                                 & D.diConditionExpression .~ Just expr
-    in void (send cmd)
+deleteItemCondByKey p pkey cond = void $ deleteItemCondByKey' p pkey cond
+
+-- | Delete item from the database by specifying the primary key and a condition and receive response.
+-- Throws AWS exception if the condition does not succeed.
+deleteItemCondByKey' :: forall m a r.
+    (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> FilterCondition a -> m D.DeleteItemResponse
+deleteItemCondByKey' p pkey cond =
+     let (expr, attnames, attvals) = dumpCondition cond
+         cmd = dDeleteItem p pkey & D.diExpressionAttributeNames .~ attnames
+                                  & bool (D.diExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
+                                  & D.diConditionExpression .~ Just expr
+    in send cmd
 
 -- | Generate update item object; automatically adds condition for existence of primary
 -- key, so that only existing objects are modified
