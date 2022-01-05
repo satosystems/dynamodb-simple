@@ -22,7 +22,8 @@ import           Data.Proxy
 import           Data.Semigroup           ((<>))
 import qualified Data.Text                as T
 import           Network.AWS
-import           Network.AWS.DynamoDB     (dynamoDB,
+import           Network.AWS.DynamoDB     (dirsResponseStatus,
+                                           dynamoDB,
                                            pirsResponseStatus)
 import           System.Environment       (setEnv)
 import           System.IO                (stdout)
@@ -225,14 +226,22 @@ spec = do
     withDb "deleting by key" $ do
         let testitem1 = Test "1" 2 "" False 3.14 2 Nothing
         let testitem2 = Test "1" 3 "aaa" False 3.14 2 (Just "test")
+        let testitem3 = Test "1" 4 "" False 3.14 2 Nothing
+        let testitem4 = Test "1" 5 "aaa" False 3.14 2 (Just "test")
         putItem testitem1
         putItem testitem2
+        putItem testitem3
+        putItem testitem4
         (items, _) <- scan tTest scanOpts 10
         deleteItemByKey tTest (tableKey testitem1)
         deleteItemByKey tTest (tableKey testitem2)
+        res1 <- deleteItemByKey' tTest (tableKey testitem3)
+        res2 <- deleteItemByKey' tTest (tableKey testitem4)
+        liftIO $ res1 ^. dirsResponseStatus `shouldBe` 200
+        liftIO $ res2 ^. dirsResponseStatus `shouldBe` 200
         (items2, _) <- scan tTest scanOpts 10
         liftIO $ do
-          length items `shouldBe` 2
+          length items `shouldBe` 4
           length items2 `shouldBe` 0
 
     withDb "test left join" $ do

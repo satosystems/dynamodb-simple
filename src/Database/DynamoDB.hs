@@ -75,6 +75,7 @@ module Database.DynamoDB (
   , updateItemCond_
     -- * Deleting data
   , deleteItemByKey
+  , deleteItemByKey'
   , deleteItemCondByKey
   , deleteItemBatchByKey
     -- * Delete table
@@ -159,7 +160,11 @@ getItem consistency p key = do
 
 -- | Delete item from the database by specifying the primary key.
 deleteItemByKey :: forall m a r. (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> m ()
-deleteItemByKey p pkey = void $ send (dDeleteItem p pkey)
+deleteItemByKey p pkey = void $ deleteItemByKey' p pkey
+
+-- | Delete item from the database by specifying the primary key and receive the response.
+deleteItemByKey' :: forall m a r. (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> m D.DeleteItemResponse
+deleteItemByKey' p pkey = send (dDeleteItem p pkey)
 
 -- | Delete item from the database by specifying the primary key and a condition.
 -- Throws AWS exception if the condition does not succeed.
