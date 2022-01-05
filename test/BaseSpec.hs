@@ -105,6 +105,10 @@ spec = do
         insertItem testitem1
         (res :: Either SomeException ()) <- try (insertItem testitem1_)
         liftIO $ res `shouldSatisfy` isLeft
+    withDb "insertItem' returns response" $ do
+        let testitem1 = Test "1" 2 "text" False 3.14 2 Nothing
+        res1 <- insertItem' testitem1
+        liftIO $ res1 ^. pirsResponseStatus `shouldBe` 200
     withDb "scanSource works correctly with sLimit" $ do
         let template i = Test (T.pack $ show i) i "text" False 3.14 i Nothing
             newItems = map template [1..55]

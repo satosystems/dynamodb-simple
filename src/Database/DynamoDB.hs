@@ -68,6 +68,7 @@ module Database.DynamoDB (
   , putItem'
   , putItemBatch
   , insertItem
+  , insertItem'
     -- * Data modification
   , updateItemByKey
   , updateItemByKey_
@@ -129,7 +130,11 @@ putItem' item = send (dPutItem item)
 
 -- | Write item into the database only if it doesn't already exist.
 insertItem  :: forall a r m. (MonadAWS m, DynamoTable a r) => a -> m ()
-insertItem item = do
+insertItem = void . insertItem'
+
+-- | Write item into the database only if it doesn't already exist and receive the response.
+insertItem' :: forall a r m. (MonadAWS m, DynamoTable a r) => a -> m D.PutItemResponse
+insertItem' item = do
   let keyfields = primaryFields (Proxy :: Proxy a)
       -- Create condition attribute_not_exist(hash_key)
       pkeyMissing = (AttrMissing . nameGenPath . pure . IntraName) $ head keyfields
@@ -137,7 +142,7 @@ insertItem item = do
       cmd = dPutItem item & D.piExpressionAttributeNames .~ attnames
                           & D.piConditionExpression .~ Just expr
                           & bool (D.piExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
-  void $ send cmd
+  send cmd
 
 
 -- | Read item from the database; primary key is either a hash key or (hash,range) tuple depending on the table.
