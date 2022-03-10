@@ -47,6 +47,7 @@ module Database.DynamoDB (
   , query
   , query'
   , querySimple
+  , querySimple'
   , queryCond
   , querySource
   , querySourceChunks

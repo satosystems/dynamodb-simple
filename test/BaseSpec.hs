@@ -24,7 +24,8 @@ import qualified Data.Text                as T
 import           Network.AWS
 import           Network.AWS.DynamoDB     (dirsResponseStatus,
                                            dynamoDB,
-                                           pirsResponseStatus)
+                                           pirsResponseStatus,
+                                           qrsResponseStatus)
 import           System.Environment       (setEnv)
 import           System.IO                (stdout)
 import           Test.Hspec
@@ -168,6 +169,14 @@ spec = do
             newItems = map template [1..55]
         putItemBatch newItems
         items <- querySimple tTest "hashkey" (Just $ RangeLessThan 30) Backward 5
+        liftIO $ map iRangeKey items `shouldBe` [29,28..25]
+    withDb "querySimple' works correctly with RangeOper" $ do
+        let template i = Test "hashkey" i "text" False 3.14 i Nothing
+            newItems = map template [1..55]
+        putItemBatch newItems
+        (items, mPk, rs) <- querySimple' tTest "hashkey" (Just $ RangeLessThan 30) Backward 5
+        liftIO $ fromJust mPk `shouldBe` ("hashkey", 25)
+        liftIO $ rs ^. qrsResponseStatus `shouldBe` 200
         liftIO $ map iRangeKey items `shouldBe` [29,28..25]
     withDb "queryCond works correctly with -1 limit" $ do
         let template i = Test "hashkey" i "text" False 3.14 i Nothing
