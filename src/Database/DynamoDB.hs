@@ -45,6 +45,7 @@ module Database.DynamoDB (
   , qConsistentRead, qStartKey, qDirection, qFilterCondition, qHashKey, qRangeCondition, qLimit
     -- * Performing query
   , query
+  , query'
   , querySimple
   , queryCond
   , querySource
