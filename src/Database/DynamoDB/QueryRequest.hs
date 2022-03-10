@@ -200,7 +200,7 @@ querySimple' :: forall a t m hash range.
   -> Maybe (RangeOper range) -- ^ Range condition
   -> Direction -- ^ Scan direction
   -> Int -- ^ Maximum number of items to fetch
-  -> m ([a], (Maybe (PrimaryKey a 'WithRange), Rs D.Query))
+  -> m ([a], Maybe (PrimaryKey a 'WithRange), Rs D.Query)
 querySimple' p key range direction limit = do
   let opts = queryOpts key & qRangeCondition .~ range
                            & qDirection .~ direction
@@ -248,7 +248,7 @@ query' :: forall a t m range hash.
   => Proxy a
   -> QueryOpts a hash range
   -> Int -- ^ Maximum number of items to fetch
-  -> m ([a], (Maybe (PrimaryKey a 'WithRange), Rs D.Query))
+  -> m ([a], Maybe (PrimaryKey a 'WithRange), Rs D.Query)
 query' _ opts limit = do
     -- Add qLimit to the opts if not already there - and if there is no condition
     let cmd = queryCmd (opts & addQLimit)
@@ -293,24 +293,24 @@ boundedFetch' :: forall a r t m cmd.
   -> (Rs cmd -> HashMap T.Text D.AttributeValue)
   -> cmd
   -> Int -- ^ Maximum number of items to fetch
-  -> m ([a], (Maybe (PrimaryKey a r), Rs cmd))
+  -> m ([a], Maybe (PrimaryKey a r), Rs cmd)
 boundedFetch' startLens rsResult rsLast startcmd limit = do
-      (result, (nextcmd, rs')) <- unfoldLimit' fetch startcmd limit
+      (result, nextcmd, rs') <- unfoldLimit' fetch startcmd limit
       if | length result > limit ->
              let final = Seq.take limit result
              in case Seq.viewr final of
-                 Seq.EmptyR -> return ([], (Nothing, rs'))
-                 (_ Seq.:> lastitem) -> return (toList final, (Just (dItemToKey lastitem), rs'))
+                 Seq.EmptyR -> return ([], Nothing, rs')
+                 (_ Seq.:> lastitem) -> return (toList final, Just (dItemToKey lastitem), rs')
          | length result == limit, Just rs <- nextcmd ->
-              return (toList result, (dAttrToKey (Proxy :: Proxy a) (rs ^. startLens), rs'))
-         | otherwise -> return (toList result, (Nothing, rs'))
+              return (toList result, dAttrToKey (Proxy :: Proxy a) (rs ^. startLens), rs')
+         | otherwise -> return (toList result, Nothing, rs')
   where
     fetch cmd = do
         rs <- send cmd
         items <- Seq.fromList <$> mapM rsDecoder (rsResult rs)
         let lastkey = rsLast rs
             newquery = bool (Just (cmd & startLens .~ lastkey)) Nothing (null lastkey)
-        return (items, (newquery, rs))
+        return (items, newquery, rs)
 
 -- | Run command as long as Maybe cmd is Just or the resulting sequence is smaller than limit
 unfoldLimit :: Monad m => (cmd -> m (Seq a, Maybe cmd)) -> cmd -> Int -> m (Seq a, Maybe cmd)
@@ -323,14 +323,14 @@ unfoldLimit code = go
          | otherwise                       -> return (vals, mnext)
 
 -- | Run command as long as Maybe cmd is Just or the resulting sequence is smaller than limit
-unfoldLimit' :: Monad m => (cmd -> m (Seq a, (Maybe cmd, Rs cmd))) -> cmd -> Int -> m (Seq a, (Maybe cmd, Rs cmd))
+unfoldLimit' :: Monad m => (cmd -> m (Seq a, Maybe cmd, Rs cmd)) -> cmd -> Int -> m (Seq a, Maybe cmd, Rs cmd)
 unfoldLimit' code = go
   where
     go cmd limit = do
-      (vals, (mnext, rs)) <- code cmd
+      (vals, mnext, rs) <- code cmd
       let cnt = length vals
-      if | Just next <- mnext, cnt < limit -> first (vals <>) <$> go next (limit - cnt)
-         | otherwise                       -> return (vals, (mnext, rs))
+      if | Just next <- mnext, cnt < limit -> go next (limit - cnt) >>= \(vals', mnext', rs') -> return (vals <> vals', mnext', rs')
+         | otherwise                       -> return (vals, mnext, rs)
 
 -- | Record for defining scan command. Use lenses to set the content.
 --
