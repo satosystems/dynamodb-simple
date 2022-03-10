@@ -17,6 +17,7 @@ module Database.DynamoDB.QueryRequest (
   -- * Query
     query
   , querySimple
+  , querySimple'
   , queryCond
   , querySource
   , querySourceChunks
@@ -188,6 +189,22 @@ querySimple p key range direction limit = do
   let opts = queryOpts key & qRangeCondition .~ range
                            & qDirection .~ direction
   fst <$> query p opts limit
+
+-- | Perform a simple, eventually consistent, query.
+--
+-- Simple to use function to query limited amount of data from database.
+querySimple' :: forall a t m hash range.
+  (CanQuery a t hash range, MonadAWS m)
+  => Proxy a -- ^ Proxy type of a table to query
+  -> hash        -- ^ Hash key
+  -> Maybe (RangeOper range) -- ^ Range condition
+  -> Direction -- ^ Scan direction
+  -> Int -- ^ Maximum number of items to fetch
+  -> m ([a], (Maybe (PrimaryKey a 'WithRange), Rs D.Query))
+querySimple' p key range direction limit = do
+  let opts = queryOpts key & qRangeCondition .~ range
+                           & qDirection .~ direction
+  query' p opts limit
 
 -- | Query with condition
 queryCond :: forall a t m hash range.
