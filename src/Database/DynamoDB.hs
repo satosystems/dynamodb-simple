@@ -38,6 +38,7 @@ module Database.DynamoDB (
     , (<.>), (<!>), (<!:>)
     -- * Fetching items
   , getItem
+  , getItem'
   , getItemBatch
     -- * Query options
   , QueryOpts
@@ -116,6 +117,7 @@ import           Database.DynamoDB.Types
 import           Database.DynamoDB.Update
 import           Database.DynamoDB.BatchRequest
 import           Database.DynamoDB.QueryRequest
+import Network.AWS.DynamoDB (getItemResponse)
 
 
 dDeleteItem :: DynamoTable a r => Proxy a -> PrimaryKey a r -> D.DeleteItem
@@ -159,6 +161,18 @@ getItem consistency p key = do
      | otherwise ->
           case dGsDecode result of
               Right res -> return (Just res)
+              Left err -> throwM (DynamoException $ "Cannot decode item: " <> err)
+
+-- | Read item from the database; primary key is either a hash key or (hash,range) tuple depending on the table.
+getItem' :: forall m a r. (MonadAWS m, DynamoTable a r) => Consistency -> Proxy a -> PrimaryKey a r -> m (Maybe( a,D.GetItemResponse ))
+getItem' consistency p key = do
+  let cmd = dGetItem p key & D.giConsistentRead . consistencyL .~ consistency
+  rs <- send cmd
+  let result = rs ^. D.girsItem
+  if | null result -> return Nothing
+     | otherwise ->
+          case dGsDecode result of
+              Right res -> return (Just (res,rs))
               Left err -> throwM (DynamoException $ "Cannot decode item: " <> err)
 
 -- | Delete item from the database by specifying the primary key.
