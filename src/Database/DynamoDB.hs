@@ -59,6 +59,7 @@ module Database.DynamoDB (
   , sFilterCondition, sConsistentRead, sLimit, sParallel, sStartKey
     -- * Performing scan
   , scan
+  , scan'
   , scanSource
   , scanSourceChunks
   , scanCond
