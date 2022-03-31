@@ -25,6 +25,7 @@ module Database.DynamoDB.QueryRequest (
   , querySourceByKey
   -- * Scan
   , scan
+  , scan'
   , scanCond
   , scanSource
   , scanSourceChunks
@@ -317,9 +318,21 @@ scan :: (MonadAWS m, TableScan a r t)
   -> ScanOpts a r  -- ^ Scan settings
   -> Int  -- ^ Required result count
   -> m ([a], Maybe (PrimaryKey a r)) -- ^ list of results, lastEvalutedKey or Nothing if end of data reached
-scan _ opts limit = do
+scan p opts limit = do
+    (items, newquery, _) <- scan' p opts limit
+    return (items, newquery)
+
+-- | Function to call bounded scans. Tries to return exactly requested number of items.
+--
+-- Use 'sStartKey' to continue the scan.
+scan' :: (MonadAWS m, TableScan a r t)
+  => Proxy a
+  -> ScanOpts a r  -- ^ Scan settings
+  -> Int  -- ^ Required result count
+  -> m ([a], Maybe (PrimaryKey a r), Rs D.Scan) -- ^ list of results, lastEvalutedKey or Nothing if end of data reached
+scan' _ opts limit = do
     let cmd = scanCmd (opts & addSLimit)
-    boundedFetch D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
+    boundedFetch' D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
   where
     -- If there is no filtercondition, number of processed items = number of scanned items
     addSLimit
