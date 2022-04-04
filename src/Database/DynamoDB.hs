@@ -16,7 +16,8 @@
 --
 -- Type-safe library for accessing DynamoDB database.
 --
-module Database.DynamoDB (
+module Database.DynamoDB
+  (
     -- * Introduction
     -- $intro
 
@@ -35,7 +36,9 @@ module Database.DynamoDB (
   , Direction(..)
   , Column
     -- * Attribute path combinators
-    , (<.>), (<!>), (<!:>)
+  , (<.>)
+  , (<!>)
+  , (<!:>)
     -- * Fetching items
   , getItem
   , getItem'
@@ -43,12 +46,19 @@ module Database.DynamoDB (
     -- * Query options
   , QueryOpts
   , queryOpts
-  , qConsistentRead, qStartKey, qDirection, qFilterCondition, qHashKey, qRangeCondition, qLimit
+  , qConsistentRead
+  , qStartKey
+  , qDirection
+  , qFilterCondition
+  , qHashKey
+  , qRangeCondition
+  , qLimit
     -- * Performing query
   , query
   , querySimple
   , querySimple'
   , queryCond
+  , queryCond'
   , querySource
   , querySourceChunks
   , querySourceByKey
@@ -56,7 +66,11 @@ module Database.DynamoDB (
     -- * Scan options
   , ScanOpts
   , scanOpts
-  , sFilterCondition, sConsistentRead, sLimit, sParallel, sStartKey
+  , sFilterCondition
+  , sConsistentRead
+  , sLimit
+  , sParallel
+  , sStartKey
     -- * Performing scan
   , scan
   , scan'
@@ -94,31 +108,37 @@ module Database.DynamoDB (
   , ContainsTableKey
   , CanQuery
   , TableScan
-) where
+  ) where
 
-import           Control.Lens                        ((%~), (.~), (^.))
-import           Control.Monad                       (void)
-import           Control.Monad.Catch                 (throwM)
-import           Data.Bool                           (bool)
-import           Data.Function                       ((&))
+import           Control.Lens                   ( (%~)
+                                                , (.~)
+                                                , (^.)
+                                                )
+import           Control.Monad                  ( void )
+import           Control.Monad.Catch            ( throwM )
+import           Data.Bool                      ( bool )
+import           Data.Function                  ( (&) )
 import           Data.Proxy
-import           Data.Semigroup                      ((<>))
+import           Data.Semigroup                 ( (<>) )
 import           Network.AWS
-import qualified Network.AWS.DynamoDB.DeleteItem     as D
-import qualified Network.AWS.DynamoDB.GetItem        as D
-import qualified Network.AWS.DynamoDB.PutItem        as D
-import qualified Network.AWS.DynamoDB.UpdateItem     as D
-import qualified Network.AWS.DynamoDB.DeleteTable    as D
+import qualified Network.AWS.DynamoDB.DeleteItem
+                                               as D
+import qualified Network.AWS.DynamoDB.DeleteTable
+                                               as D
+import qualified Network.AWS.DynamoDB.GetItem  as D
+import qualified Network.AWS.DynamoDB.PutItem  as D
 import qualified Network.AWS.DynamoDB.Types    as D
+import qualified Network.AWS.DynamoDB.UpdateItem
+                                               as D
 
+import           Database.DynamoDB.BatchRequest
 import           Database.DynamoDB.Class
 import           Database.DynamoDB.Filter
 import           Database.DynamoDB.Internal
+import           Database.DynamoDB.QueryRequest
 import           Database.DynamoDB.Types
 import           Database.DynamoDB.Update
-import           Database.DynamoDB.BatchRequest
-import           Database.DynamoDB.QueryRequest
-import Network.AWS.DynamoDB (getItemResponse)
+import           Network.AWS.DynamoDB           ( getItemResponse )
 
 
 dDeleteItem :: DynamoTable a r => Proxy a -> PrimaryKey a r -> D.DeleteItem
@@ -136,126 +156,193 @@ putItem' :: (MonadAWS m, DynamoTable a r) => a -> m D.PutItemResponse
 putItem' item = send (dPutItem item)
 
 -- | Write item into the database only if it doesn't already exist.
-insertItem  :: forall a r m. (MonadAWS m, DynamoTable a r) => a -> m ()
+insertItem :: forall a r m . (MonadAWS m, DynamoTable a r) => a -> m ()
 insertItem = void . insertItem'
 
 -- | Write item into the database only if it doesn't already exist and receive the response.
-insertItem'  :: forall a r m. (MonadAWS m, DynamoTable a r) => a -> m D.PutItemResponse
+insertItem'
+  :: forall a r m . (MonadAWS m, DynamoTable a r) => a -> m D.PutItemResponse
 insertItem' item = do
   let keyfields = primaryFields (Proxy :: Proxy a)
       -- Create condition attribute_not_exist(hash_key)
-      pkeyMissing = (AttrMissing . nameGenPath . pure . IntraName) $ head keyfields
+      pkeyMissing =
+        (AttrMissing . nameGenPath . pure . IntraName) $ head keyfields
       (expr, attnames, attvals) = dumpCondition pkeyMissing
-      cmd = dPutItem item & D.piExpressionAttributeNames .~ attnames
-                          & D.piConditionExpression .~ Just expr
-                          & bool (D.piExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
+      cmd =
+        dPutItem item
+          &  D.piExpressionAttributeNames
+          .~ attnames
+          &  D.piConditionExpression
+          .~ Just expr
+          &  bool (D.piExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
   send cmd
 
 
 -- | Read item from the database; primary key is either a hash key or (hash,range) tuple depending on the table.
-getItem :: forall m a r. (MonadAWS m, DynamoTable a r) => Consistency -> Proxy a -> PrimaryKey a r -> m (Maybe a)
+getItem
+  :: forall m a r
+   . (MonadAWS m, DynamoTable a r)
+  => Consistency
+  -> Proxy a
+  -> PrimaryKey a r
+  -> m (Maybe a)
 getItem consistency p key = do
   let cmd = dGetItem p key & D.giConsistentRead . consistencyL .~ consistency
   rs <- send cmd
   let result = rs ^. D.girsItem
-  if | null result -> return Nothing
-     | otherwise ->
-          case dGsDecode result of
-              Right res -> return (Just res)
-              Left err -> throwM (DynamoException $ "Cannot decode item: " <> err)
+  if
+    | null result -> return Nothing
+    | otherwise -> case dGsDecode result of
+      Right res -> return (Just res)
+      Left  err -> throwM (DynamoException $ "Cannot decode item: " <> err)
 
 -- | Read item from the database; primary key is either a hash key or (hash,range) tuple depending on the table.
-getItem' :: forall m a r. (MonadAWS m, DynamoTable a r) => Consistency -> Proxy a -> PrimaryKey a r -> m (Maybe( a,D.GetItemResponse ))
+getItem'
+  :: forall m a r
+   . (MonadAWS m, DynamoTable a r)
+  => Consistency
+  -> Proxy a
+  -> PrimaryKey a r
+  -> m (Maybe (a, D.GetItemResponse))
 getItem' consistency p key = do
   let cmd = dGetItem p key & D.giConsistentRead . consistencyL .~ consistency
   rs <- send cmd
   let result = rs ^. D.girsItem
-  if | null result -> return Nothing
-     | otherwise ->
-          case dGsDecode result of
-              Right res -> return (Just (res,rs))
-              Left err -> throwM (DynamoException $ "Cannot decode item: " <> err)
+  if
+    | null result -> return Nothing
+    | otherwise -> case dGsDecode result of
+      Right res -> return (Just (res, rs))
+      Left  err -> throwM (DynamoException $ "Cannot decode item: " <> err)
 
 -- | Delete item from the database by specifying the primary key.
-deleteItemByKey :: forall m a r. (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> m ()
+deleteItemByKey
+  :: forall m a r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> m ()
 deleteItemByKey p pkey = void $ deleteItemByKey' p pkey
 
 -- | Delete item from the database by specifying the primary key and receive the response.
-deleteItemByKey' :: forall m a r. (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> m D.DeleteItemResponse
+deleteItemByKey'
+  :: forall m a r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> m D.DeleteItemResponse
 deleteItemByKey' p pkey = send (dDeleteItem p pkey)
 
 -- | Delete item from the database by specifying the primary key and a condition.
 -- Throws AWS exception if the condition does not succeed.
-deleteItemCondByKey :: forall m a r.
-    (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> FilterCondition a -> m ()
+deleteItemCondByKey
+  :: forall m a r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> FilterCondition a
+  -> m ()
 deleteItemCondByKey p pkey cond = void $ deleteItemCondByKey' p pkey cond
 
 -- | Delete item from the database by specifying the primary key and a condition and receive response.
 -- Throws AWS exception if the condition does not succeed.
-deleteItemCondByKey' :: forall m a r.
-    (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> FilterCondition a -> m D.DeleteItemResponse
+deleteItemCondByKey'
+  :: forall m a r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> FilterCondition a
+  -> m D.DeleteItemResponse
 deleteItemCondByKey' p pkey cond =
-    let (expr, attnames, attvals) = dumpCondition cond
-        cmd = dDeleteItem p pkey & D.diExpressionAttributeNames .~ attnames
-                                 & bool (D.diExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
-                                 & D.diConditionExpression .~ Just expr
-    in send cmd
+  let (expr, attnames, attvals) = dumpCondition cond
+      cmd =
+        dDeleteItem p pkey
+          &  D.diExpressionAttributeNames
+          .~ attnames
+          &  bool (D.diExpressionAttributeValues .~ attvals) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
+          &  D.diConditionExpression
+          .~ Just expr
+  in  send cmd
 
 -- | Generate update item object; automatically adds condition for existence of primary
 -- key, so that only existing objects are modified
-dUpdateItem :: forall a r. DynamoTable a r
-          => Proxy a -> PrimaryKey a r -> Action a -> Maybe (FilterCondition a) ->  Maybe D.UpdateItem
-dUpdateItem p pkey actions mcond =
-    genAction <$> dumpActions actions
-  where
-    keyfields = primaryFields p
-        -- Create condition attribute_exists(hash_key)
-    pkeyExists = (AttrExists . nameGenPath . pure . IntraName) (head keyfields)
+dUpdateItem
+  :: forall a r
+   . DynamoTable a r
+  => Proxy a
+  -> PrimaryKey a r
+  -> Action a
+  -> Maybe (FilterCondition a)
+  -> Maybe D.UpdateItem
+dUpdateItem p pkey actions mcond = genAction <$> dumpActions actions
+ where
+  keyfields  = primaryFields p
+      -- Create condition attribute_exists(hash_key)
+  pkeyExists = (AttrExists . nameGenPath . pure . IntraName) (head keyfields)
 
-    genAction actparams =
-        D.updateItem (tableName p) & D.uiKey .~ dKeyToAttr p pkey
-                                   & addActions actparams
-                                   & addCondition (Just pkeyExists <> mcond)
+  genAction actparams =
+    D.updateItem (tableName p)
+      &  D.uiKey
+      .~ dKeyToAttr p pkey
+      &  addActions actparams
+      &  addCondition (Just pkeyExists <> mcond)
 
-    addActions (expr, attnames, attvals) =
-          (D.uiUpdateExpression .~ Just expr)
-            . (D.uiExpressionAttributeNames %~ (<> attnames))
-            . bool (D.uiExpressionAttributeValues %~ (<> attvals)) id (null attvals)
-    addCondition (Just cond) =
-        let (expr, attnames, attvals) = dumpCondition cond
-        in  (D.uiConditionExpression .~ Just expr)
-            . (D.uiExpressionAttributeNames %~ (<> attnames))
-            . bool (D.uiExpressionAttributeValues %~ (<> attvals)) id (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
-    addCondition Nothing = id -- Cannot happen anyway
+  addActions (expr, attnames, attvals) =
+    (D.uiUpdateExpression .~ Just expr)
+      . (D.uiExpressionAttributeNames %~ (<> attnames))
+      . bool (D.uiExpressionAttributeValues %~ (<> attvals)) id (null attvals)
+  addCondition (Just cond) =
+    let (expr, attnames, attvals) = dumpCondition cond
+    in  (D.uiConditionExpression .~ Just expr)
+          . (D.uiExpressionAttributeNames %~ (<> attnames))
+          . bool (D.uiExpressionAttributeValues %~ (<> attvals))
+                 id
+                 (null attvals) -- HACK; https://github.com/brendanhay/amazonka/issues/332
+  addCondition Nothing = id -- Cannot happen anyway
 
 
 -- | Update item in a table.
 --
 -- > updateItem (Proxy :: Proxy Test) (12, "2") (colCount +=. 100)
-updateItemByKey_ :: forall a m r.
-      (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> Action a -> m ()
+updateItemByKey_
+  :: forall a m r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> Action a
+  -> m ()
 updateItemByKey_ p pkey actions
   | Just cmd <- dUpdateItem p pkey actions Nothing = void $ send cmd
   | otherwise = return ()
 
 -- | Update item in a database, return an updated version of the item.
-updateItemByKey :: forall a m r.
-      (MonadAWS m, DynamoTable a r) => Proxy a -> PrimaryKey a r -> Action a -> m a
+updateItemByKey
+  :: forall a m r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> Action a
+  -> m a
 updateItemByKey p pkey actions
   | Just cmd <- dUpdateItem p pkey actions Nothing = do
-        rs <- send (cmd & D.uiReturnValues .~ Just D.AllNew)
-        case dGsDecode (rs ^. D.uirsAttributes) of
-            Right res -> return res
-            Left err -> throwM (DynamoException $ "Cannot decode item: " <> err)
+    rs <- send (cmd & D.uiReturnValues .~ Just D.AllNew)
+    case dGsDecode (rs ^. D.uirsAttributes) of
+      Right res -> return res
+      Left  err -> throwM (DynamoException $ "Cannot decode item: " <> err)
   | otherwise = do
-      rs <- getItem Strongly p pkey
-      case rs of
-          Just res -> return res
-          Nothing -> throwM (DynamoException "Cannot decode item.")
+    rs <- getItem Strongly p pkey
+    case rs of
+      Just res -> return res
+      Nothing  -> throwM (DynamoException "Cannot decode item.")
 
 -- | Update item in a table while specifying a condition.
-updateItemCond_ :: forall a m r. (MonadAWS m, DynamoTable a r)
-    => Proxy a -> PrimaryKey a r -> FilterCondition a -> Action a -> m ()
+updateItemCond_
+  :: forall a m r
+   . (MonadAWS m, DynamoTable a r)
+  => Proxy a
+  -> PrimaryKey a r
+  -> FilterCondition a
+  -> Action a
+  -> m ()
 updateItemCond_ p pkey cond actions
   | Just cmd <- dUpdateItem p pkey actions (Just cond) = void $ send cmd
   | otherwise = return ()
@@ -265,7 +352,8 @@ deleteTable :: (MonadAWS m, DynamoTable a r) => Proxy a -> m ()
 deleteTable = void . deleteTable'
 
 -- | Delete a table from DynamoDB and receive response.
-deleteTable' :: (MonadAWS m, DynamoTable a r) => Proxy a -> m D.DeleteTableResponse
+deleteTable'
+  :: (MonadAWS m, DynamoTable a r) => Proxy a -> m D.DeleteTableResponse
 deleteTable' p = send (D.deleteTable (tableName p))
 
 -- | Extract primary key from a record.
@@ -273,7 +361,7 @@ deleteTable' p = send (D.deleteTable (tableName p))
 -- You can use this on both main table or on index tables if they contain the primary key from
 -- the main table. Table key is always projected to indexes anyway, so just define it in
 -- every index.
-tableKey :: forall a parent key. ContainsTableKey a parent key => a -> key
+tableKey :: forall a parent key . ContainsTableKey a parent key => a -> key
 tableKey = dTableKey
 
 -- $intro
