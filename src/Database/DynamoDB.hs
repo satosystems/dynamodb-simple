@@ -49,6 +49,7 @@ module Database.DynamoDB (
   , querySimple
   , querySimple'
   , queryCond
+  , queryCond'
   , querySource
   , querySourceChunks
   , querySourceByKey
@@ -105,6 +106,7 @@ import           Data.Function                       ((&))
 import           Data.Proxy
 import           Data.Semigroup                      ((<>))
 import           Network.AWS
+import           Network.AWS.DynamoDB                (getItemResponse)
 import qualified Network.AWS.DynamoDB.DeleteItem     as D
 import qualified Network.AWS.DynamoDB.GetItem        as D
 import qualified Network.AWS.DynamoDB.PutItem        as D
@@ -112,9 +114,11 @@ import qualified Network.AWS.DynamoDB.UpdateItem     as D
 import qualified Network.AWS.DynamoDB.DeleteTable    as D
 import qualified Network.AWS.DynamoDB.Types    as D
 
+import           Database.DynamoDB.BatchRequest
 import           Database.DynamoDB.Class
 import           Database.DynamoDB.Filter
 import           Database.DynamoDB.Internal
+import           Database.DynamoDB.QueryRequest
 import           Database.DynamoDB.Types
 import           Database.DynamoDB.Update
 import           Database.DynamoDB.BatchRequest

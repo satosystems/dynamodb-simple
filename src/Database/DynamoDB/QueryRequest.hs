@@ -20,6 +20,7 @@ module Database.DynamoDB.QueryRequest (
   , querySimple
   , querySimple'
   , queryCond
+  , queryCond'
   , querySource
   , querySourceChunks
   , queryOverIndex
@@ -219,10 +220,24 @@ queryCond :: forall a t m hash range.
   -> Int -- ^ Maximum number of items to fetch
   -> m [a]
 queryCond p key range cond direction limit = do
+  (items, _, _) <- queryCond' p key range cond direction limit
+  return items
+
+-- | Query with condition
+queryCond' :: forall a t m hash range.
+  (CanQuery a t hash range, MonadAWS m)
+  => Proxy a
+  -> hash        -- ^ Hash key
+  -> Maybe (RangeOper range) -- ^ Range condition
+  -> FilterCondition a
+  -> Direction -- ^ Scan direction
+  -> Int -- ^ Maximum number of items to fetch
+  -> m ([a], Maybe (PrimaryKey a 'WithRange), Rs D.Query)
+queryCond' p key range cond direction limit = do
   let opts = queryOpts key & qRangeCondition .~ range
                            & qDirection .~ direction
                            & qFilterCondition .~ Just cond
-  fst <$> query p opts limit
+  query' p opts limit
 
 -- | Fetch exactly the required count of items even when
 -- it means more calls to dynamodb. Return last evaluted key if end of data
