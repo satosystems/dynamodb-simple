@@ -27,6 +27,7 @@ module Database.DynamoDB.QueryRequest (
   , scan
   , scan'
   , scanCond
+  , scanCond'
   , scanSource
   , scanSourceChunks
   -- * Query options
@@ -370,10 +371,18 @@ scanCmd q =
 --
 -- > scanCond (colAddress <!:> "Home" <.> colCity ==. "London") 10
 scanCond :: forall a m r t. (MonadAWS m, TableScan a r t) => Proxy a -> FilterCondition a -> Int -> m [a]
-scanCond _ cond limit = do
+scanCond p cond limit = do
+  (items, _, _) <- scanCond' p cond limit
+  return items
+
+-- | Scan table using a given filter condition.
+--
+-- > scanCond' (colAddress <!:> "Home" <.> colCity ==. "London") 10
+scanCond' :: forall a m r t. (MonadAWS m, TableScan a r t) => Proxy a -> FilterCondition a -> Int -> m ([a], Maybe (PrimaryKey a r), D.ScanResponse)
+scanCond' _ cond limit = do
   let opts = scanOpts & sFilterCondition .~ Just cond
       cmd = scanCmd opts
-  fst <$> boundedFetch D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
+  boundedFetch' D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
 
 -- | Conduit to do a left join on the items being sent; supposed to be used with querySourceChunks.
 --

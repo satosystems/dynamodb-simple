@@ -62,6 +62,7 @@ module Database.DynamoDB (
   , scanSource
   , scanSourceChunks
   , scanCond
+  , scanCond'
     -- * Helper conduits
   , leftJoin
   , innerJoin
