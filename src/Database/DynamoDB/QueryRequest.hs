@@ -233,7 +233,7 @@ query' :: forall a t m range hash.
 query' _ opts limit = do
     -- Add qLimit to the opts if not already there - and if there is no condition
     let cmd = queryCmd (opts & addQLimit)
-    boundedFetch' D.qExclusiveStartKey (view D.qrsItems) (view D.qrsLastEvaluatedKey) cmd limit
+    boundedFetch D.qExclusiveStartKey (view D.qrsItems) (view D.qrsLastEvaluatedKey) cmd limit
   where
     addQLimit
       | Nothing <- opts ^. qLimit, Nothing <- opts ^. qFilterCondition = qLimit .~ Just (fromIntegral limit)
@@ -247,21 +247,8 @@ boundedFetch :: forall a r t m cmd.
   -> (Rs cmd -> HashMap T.Text D.AttributeValue)
   -> cmd
   -> Int -- ^ Maximum number of items to fetch
-  -> m ([a], Maybe (PrimaryKey a r))
-boundedFetch startLens rsResult rsLast startcmd limit = do
-      (items, newquery, _) <- boundedFetch' startLens rsResult rsLast startcmd limit
-      return (items, newquery)
-
--- | Generic query interface for scanning/querying
-boundedFetch' :: forall a r t m cmd.
-  (MonadAWS m, HasPrimaryKey a r t, AWSRequest cmd)
-  => Lens' cmd (HashMap T.Text D.AttributeValue)
-  -> (Rs cmd -> [HashMap T.Text D.AttributeValue])
-  -> (Rs cmd -> HashMap T.Text D.AttributeValue)
-  -> cmd
-  -> Int -- ^ Maximum number of items to fetch
   -> m ([a], Maybe (PrimaryKey a r), Rs cmd)
-boundedFetch' startLens rsResult rsLast startcmd limit = do
+boundedFetch startLens rsResult rsLast startcmd limit = do
       (result, nextcmd, rs') <- unfoldLimit fetch startcmd limit
       if | length result > limit ->
              let final = Seq.take limit result
@@ -333,7 +320,7 @@ scan' :: (MonadAWS m, TableScan a r t)
   -> m ([a], Maybe (PrimaryKey a r), Rs D.Scan) -- ^ list of results, lastEvalutedKey or Nothing if end of data reached
 scan' _ opts limit = do
     let cmd = scanCmd (opts & addSLimit)
-    boundedFetch' D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
+    boundedFetch D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
   where
     -- If there is no filtercondition, number of processed items = number of scanned items
     addSLimit
@@ -382,7 +369,7 @@ scanCond' :: forall a m r t. (MonadAWS m, TableScan a r t) => Proxy a -> FilterC
 scanCond' _ cond limit = do
   let opts = scanOpts & sFilterCondition .~ Just cond
       cmd = scanCmd opts
-  boundedFetch' D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
+  boundedFetch D.sExclusiveStartKey (view D.srsItems) (view D.srsLastEvaluatedKey) cmd limit
 
 -- | Conduit to do a left join on the items being sent; supposed to be used with querySourceChunks.
 --
